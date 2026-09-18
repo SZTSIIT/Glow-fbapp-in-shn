@@ -12,7 +12,7 @@ on:
 
       display_name:
         description: "App Name (Optional)"
-        default: "Facebook"
+        default: "facebook-shn"
         required: true
         type: string
 
@@ -91,10 +91,22 @@ jobs:
       - name: Inject tweaks into IPA
         run: cyan -i facebook.ipa -o Glow_FB_${{ env.GLOW_TAG }}.ipa -uwef glow_fb.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} -s
 
-      - name: Strip embedded Swift dylibs
+      - name: Patch Pyidaungsu Font Assets and Strip Swift dylibs
         run: |
           unzip -q Glow_FB_${{ env.GLOW_TAG }}.ipa -d tmp_payload
+          
+          # Overwrite Meta's ComponentKit feed fonts with Pyidaungsu.ttf
+          cd tmp_payload/Payload/*.app/
+          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf OptimisticText-Regular.ttf
+          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf OptimisticDisplay-Regular.ttf
+          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf OptimisticText-Bold.ttf
+          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf OptimisticDisplay-Bold.ttf
+          cd ${{ github.workspace }}
+
+          # Strip embedded Swift dylibs
           find tmp_payload/Payload/*.app/ -name "libswift*.dylib" -print -delete
+          
+          # Repack clean IPA
           cd tmp_payload
           zip -qr ../Glow_FB_${{ env.GLOW_TAG }}_clean.ipa Payload
           cd ..
