@@ -88,20 +88,26 @@ jobs:
           echo "Downloading: $deb_url"
           wget "$deb_url" --no-verbose -O ${{ github.workspace }}/glow_fb.deb
 
-      - name: Inject tweaks into IPA
-        run: cyan -i facebook.ipa -o Glow_FB_${{ env.GLOW_TAG }}.ipa -uwef glow_fb.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} -s
+      - name: Unpack IPA and Replace Font Assets
+        run: |
+          unzip -q facebook.ipa -d patched_ipa
+          
+          # Force overwrite all fonts inside the unpacked app bundle
+          find patched_ipa/Payload/*.app/ -type f \( -name "*.ttf" -o -name "*.otf" \) -exec cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf {} \;
 
-      - name: Patch Pyidaungsu Font Assets and Strip Swift dylibs
+          # Repack modified base IPA for cyan injection
+          cd patched_ipa
+          zip -qr ../facebook_patched.ipa Payload
+          cd ..
+
+      - name: Inject tweaks into IPA
+        run: cyan -i facebook_patched.ipa -o Glow_FB_${{ env.GLOW_TAG }}.ipa -uwef glow_fb.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} -s
+
+      - name: Strip embedded Swift dylibs
         run: |
           unzip -q Glow_FB_${{ env.GLOW_TAG }}.ipa -d tmp_payload
-          
-          # Find and overwrite EVERY font file in the .app bundle with Pyidaungsu.ttf
-          find tmp_payload/Payload/*.app/ -type f \( -name "*.ttf" -o -name "*.otf" \) -exec cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf {} \;
-
-          # Strip embedded Swift dylibs
           find tmp_payload/Payload/*.app/ -name "libswift*.dylib" -print -delete
           
-          # Repack clean IPA
           cd tmp_payload
           zip -qr ../Glow_FB_${{ env.GLOW_TAG }}_clean.ipa Payload
           cd ..
