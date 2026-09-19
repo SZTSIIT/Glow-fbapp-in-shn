@@ -30,10 +30,9 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Main
+      - name: Checkout Repository
         uses: actions/checkout@v4.1.1
         with:
-          path: main
           submodules: recursive
 
       - name: Download and validate IPA
@@ -56,7 +55,7 @@ jobs:
         env:
           THEOS: ${{ github.workspace }}/theos
         run: |
-          cd ${{ github.workspace }}/main
+          cd ${{ github.workspace }}
           make package FINALPACKAGE=1
 
       - name: Download Glow Tweak
@@ -74,26 +73,29 @@ jobs:
 
       - name: Inject Tweaks via Cyan
         run: |
-          SHAN_DEB=$(find ${{ github.workspace }}/main/packages -name "*.deb" | head -n 1)
+          SHAN_DEB=$(find ${{ github.workspace }}/packages -name "*.deb" | head -n 1)
           cyan -i facebook.ipa -o Glow_FB_${{ env.GLOW_TAG }}.ipa -uwef glow_fb.deb "$SHAN_DEB" -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} -s
 
-      - name: Bundle Pyidaungsu Asset and Update Info.plist
+      - name: Bundle Pyidaungsu Asset, Update Info.plist & Resign
         run: |
           unzip -q Glow_FB_${{ env.GLOW_TAG }}.ipa -d tmp_payload
           APP_PATH=$(find tmp_payload/Payload -maxdepth 1 -name "*.app")
           
-          # Copy Pyidaungsu.ttf directly into bundle root
-          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf "$APP_PATH/Pyidaungsu.ttf"
+          # 1. Copy Pyidaungsu.ttf directly into bundle root
+          cp -f ${{ github.workspace }}/Pyidaungsu.ttf "$APP_PATH/Pyidaungsu.ttf"
 
-          # Register font in Info.plist
+          # 2. Register font in Info.plist safely
           APP_PLIST="$APP_PATH/Info.plist"
           /usr/libexec/PlistBuddy -c "Add :UIAppFonts array" "$APP_PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :UIAppFonts:0 string Pyidaungsu.ttf" "$APP_PLIST" 2>/dev/null || true
 
-          # Strip embedded Swift dylibs
+          # 3. Clean up Swift dylibs
           find tmp_payload/Payload/ -name "libswift*.dylib" -print -delete
           
-          # Repack final IPA
+          # 4. Re-sign main binary with ldid
+          ldid -S "$APP_PATH/Facebook" 2>/dev/null || true
+
+          # 5. Repack final IPA
           cd tmp_payload
           zip -qr ../Glow_FB_${{ env.GLOW_TAG }}_patched.ipa Payload
           cd ..
@@ -105,3 +107,7 @@ jobs:
           name: Glow_FB ${{ env.GLOW_TAG }}
           files: Glow_FB_${{ env.GLOW_TAG }}.ipa
           draft: true
+
+      - name: Output Release URL
+        run: |
+          echo "::notice::Release available at: https://github.com/${{ github.repository }}/releases"
