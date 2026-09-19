@@ -88,30 +88,32 @@ jobs:
           echo "Downloading: $deb_url"
           wget "$deb_url" --no-verbose -O ${{ github.workspace }}/glow_fb.deb
 
-      - name: Unpack IPA and Replace Font Assets
-        run: |
-          unzip -q facebook.ipa -d patched_ipa
-          
-          # Force overwrite all fonts inside the unpacked app bundle
-          find patched_ipa/Payload/*.app/ -type f \( -name "*.ttf" -o -name "*.otf" \) -exec cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf {} \;
-
-          # Repack modified base IPA for cyan injection
-          cd patched_ipa
-          zip -qr ../facebook_patched.ipa Payload
-          cd ..
-
       - name: Inject tweaks into IPA
-        run: cyan -i facebook_patched.ipa -o Glow_FB_${{ env.GLOW_TAG }}.ipa -uwef glow_fb.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} -s
+        run: cyan -i facebook.ipa -o Glow_FB_${{ env.GLOW_TAG }}.ipa -uwef glow_fb.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} -s
 
-      - name: Strip embedded Swift dylibs
+      - name: Deep Patch Pyidaungsu Font Assets
         run: |
           unzip -q Glow_FB_${{ env.GLOW_TAG }}.ipa -d tmp_payload
+          
+          # 1. Copy Pyidaungsu.ttf directly into the root app bundle
+          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf tmp_payload/Payload/*.app/Pyidaungsu.ttf
+          
+          # 2. Overwrite EVERY font file across all nested Frameworks and asset folders
+          find tmp_payload/Payload/ -type f \( -name "*.ttf" -o -name "*.otf" -o -name "*.ttc" \) -exec cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf {} \;
+
+          # 3. Register Pyidaungsu in Info.plist so CoreText uses it systemically inside the app
+          APP_PLIST=$(find tmp_payload/Payload/*.app -maxdepth 1 -name "Info.plist")
+          /usr/libexec/PlistBuddy -c "Add :UIAppFonts array" "$APP_PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIAppFonts:0 string Pyidaungsu.ttf" "$APP_PLIST" 2>/dev/null || true
+
+          # 4. Strip Swift dylibs
           find tmp_payload/Payload/*.app/ -name "libswift*.dylib" -print -delete
           
+          # 5. Repack final IPA
           cd tmp_payload
-          zip -qr ../Glow_FB_${{ env.GLOW_TAG }}_clean.ipa Payload
+          zip -qr ../Glow_FB_${{ env.GLOW_TAG }}_patched.ipa Payload
           cd ..
-          mv Glow_FB_${{ env.GLOW_TAG }}_clean.ipa Glow_FB_${{ env.GLOW_TAG }}.ipa
+          mv Glow_FB_${{ env.GLOW_TAG }}_patched.ipa Glow_FB_${{ env.GLOW_TAG }}.ipa
 
       - uses: softprops/action-gh-release@v2.0.1
         with:
