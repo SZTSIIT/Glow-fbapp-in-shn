@@ -1,0 +1,9 @@
+Package: com.shan.font
+Name: ShanFontHook
+Depends: mobilesubstrate
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: Forces Pyidaungsu rendering for Shan script.
+Maintainer: Developer
+Author: Developer
+Section: Tweaks
