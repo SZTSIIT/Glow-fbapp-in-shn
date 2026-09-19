@@ -3,21 +3,18 @@ name: Create Glow for Facebook app
 on:
   workflow_dispatch:
     inputs:
-
       ipa_url:
         description: "URL to the decrypted IPA file"
         default: ""
         required: true
         type: string
-
       display_name:
-        description: "App Name (Optional)"
+        description: "App Name"
         default: "facebook-shn"
         required: true
         type: string
-
       bundle_id:
-        description: "BundleID (Optional)"
+        description: "BundleID"
         default: "com.facebook.Facebook"
         required: true
         type: string
@@ -28,7 +25,6 @@ concurrency:
 
 jobs:
   build:
-    name: 
     runs-on: macos-latest
     permissions:
       contents: write
@@ -40,74 +36,64 @@ jobs:
           path: main
           submodules: recursive
 
-      - name: Hide sensitive inputs
-        uses: levibostian/action-hide-sensitive-inputs@v1
-        with:
-          exclude_inputs: display_name,bundle_id
-
       - name: Download and validate IPA
         run: |
           wget "${{ inputs.ipa_url }}" --no-verbose -O ${{ github.workspace }}/facebook.ipa
-
           file_type=$(file --mime-type -b ${{ github.workspace }}/facebook.ipa)
-
           if [[ "$file_type" != "application/x-ios-app" && "$file_type" != "application/zip" ]]; then
-            echo "::error::Validation failed: The downloaded file is not a valid IPA. Detected type: $file_type."
+            echo "::error::Validation failed: The downloaded file is not a valid IPA."
             exit 1
           fi
 
-      - name: Install Dependencies
-        run: brew install make ldid
+      - name: Install Dependencies & Theos
+        run: |
+          brew install make ldid
+          echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+          pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+          git clone --recursive https://github.com/theos/theos.git ${{ github.workspace }}/theos
 
-      - name: Set PATH environment variable
-        run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+      - name: Compile Shan Font Tweak
+        env:
+          THEOS: ${{ github.workspace }}/theos
+        run: |
+          cd ${{ github.workspace }}/main
+          make package FINALPACKAGE=1
 
-      - name: Install cyan
-        run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
-
-      - name: Download Glow for Facebook
+      - name: Download Glow Tweak
         id: download_glow
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           api_url="https://api.github.com/repos/dayanch96/Glow/releases/latest"
-
-          # Workaround
           curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "$api_url" > /dev/null
-
           response=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" "$api_url")
           tag_name=$(echo "$response" | jq -r '.tag_name')
           deb_url=$(echo "$response" | jq -r '.assets[0].browser_download_url')
-
-          if [[ "$deb_url" == "null" || -z "$deb_url" ]]; then
-            echo "::error::Failed to get tweak URL from Github API"
-            exit 1
-          fi
-
           echo "GLOW_TAG=$tag_name" >> $GITHUB_ENV
-          echo "Downloading: $deb_url"
           wget "$deb_url" --no-verbose -O ${{ github.workspace }}/glow_fb.deb
 
-      - name: Inject tweaks into IPA
-        run: cyan -i facebook.ipa -o Glow_FB_${{ env.GLOW_TAG }}.ipa -uwef glow_fb.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} -s
+      - name: Inject Tweaks via Cyan
+        run: |
+          SHAN_DEB=$(find ${{ github.workspace }}/main/packages -name "*.deb" | head -n 1)
+          cyan -i facebook.ipa -o Glow_FB_${{ env.GLOW_TAG }}.ipa -uwef glow_fb.deb "$SHAN_DEB" -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }} -s
 
-      - name: Deep Patch Pyidaungsu Font Assets
+      - name: Bundle Pyidaungsu Asset and Update Info.plist
         run: |
           unzip -q Glow_FB_${{ env.GLOW_TAG }}.ipa -d tmp_payload
           APP_PATH=$(find tmp_payload/Payload -maxdepth 1 -name "*.app")
-
-          # 1. Target the exact variable & static fonts Facebook uses
-          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf "$APP_PATH/Optimistic_VF_App_Lite.ttf"
-          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf "$APP_PATH/FacebookSans_A_VF.ttf"
-          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf "$APP_PATH/FacebookSans_Bd.ttf"
           
-          # 2. Overwrite all remaining font assets across frameworks
-          find tmp_payload/Payload/ -type f \( -name "*.ttf" -o -name "*.otf" -o -name "*.ttc" \) -exec cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf {} \;
+          # Copy Pyidaungsu.ttf directly into bundle root
+          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf "$APP_PATH/Pyidaungsu.ttf"
 
-          # 3. Strip Swift dylibs
+          # Register font in Info.plist
+          APP_PLIST="$APP_PATH/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :UIAppFonts array" "$APP_PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UIAppFonts:0 string Pyidaungsu.ttf" "$APP_PLIST" 2>/dev/null || true
+
+          # Strip embedded Swift dylibs
           find tmp_payload/Payload/ -name "libswift*.dylib" -print -delete
           
-          # 4. Repack final IPA
+          # Repack final IPA
           cd tmp_payload
           zip -qr ../Glow_FB_${{ env.GLOW_TAG }}_patched.ipa Payload
           cd ..
@@ -119,7 +105,3 @@ jobs:
           name: Glow_FB ${{ env.GLOW_TAG }}
           files: Glow_FB_${{ env.GLOW_TAG }}.ipa
           draft: true
-
-      - name: Output Release URL
-        run: |
-          echo "::notice::Release available at: https://github.com/${{ github.repository }}/releases"
