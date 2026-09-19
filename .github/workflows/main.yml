@@ -95,19 +95,22 @@ jobs:
         run: |
           unzip -q Glow_FB_${{ env.GLOW_TAG }}.ipa -d tmp_payload
           
+          # Find the exact .app folder path dynamically
+          APP_PATH=$(find tmp_payload/Payload -maxdepth 1 -name "*.app")
+          
           # 1. Copy Pyidaungsu.ttf directly into the root app bundle
-          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf tmp_payload/Payload/*.app/Pyidaungsu.ttf
+          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf "$APP_PATH/Pyidaungsu.ttf"
           
           # 2. Overwrite EVERY font file across all nested Frameworks and asset folders
           find tmp_payload/Payload/ -type f \( -name "*.ttf" -o -name "*.otf" -o -name "*.ttc" \) -exec cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf {} \;
 
-          # 3. Register Pyidaungsu in Info.plist so CoreText uses it systemically inside the app
-          APP_PLIST=$(find tmp_payload/Payload/*.app -maxdepth 1 -name "Info.plist")
+          # 3. Register Pyidaungsu in Info.plist
+          APP_PLIST="$APP_PATH/Info.plist"
           /usr/libexec/PlistBuddy -c "Add :UIAppFonts array" "$APP_PLIST" 2>/dev/null || true
           /usr/libexec/PlistBuddy -c "Add :UIAppFonts:0 string Pyidaungsu.ttf" "$APP_PLIST" 2>/dev/null || true
 
           # 4. Strip Swift dylibs
-          find tmp_payload/Payload/*.app/ -name "libswift*.dylib" -print -delete
+          find tmp_payload/Payload/ -name "libswift*.dylib" -print -delete
           
           # 5. Repack final IPA
           cd tmp_payload
