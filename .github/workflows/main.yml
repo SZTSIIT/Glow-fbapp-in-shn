@@ -95,13 +95,8 @@ jobs:
         run: |
           unzip -q Glow_FB_${{ env.GLOW_TAG }}.ipa -d tmp_payload
           
-          # Overwrite Meta's ComponentKit feed fonts with Pyidaungsu.ttf
-          cd tmp_payload/Payload/*.app/
-          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf OptimisticText-Regular.ttf
-          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf OptimisticDisplay-Regular.ttf
-          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf OptimisticText-Bold.ttf
-          cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf OptimisticDisplay-Bold.ttf
-          cd ${{ github.workspace }}
+          # Find and overwrite EVERY font file in the .app bundle with Pyidaungsu.ttf
+          find tmp_payload/Payload/*.app/ -type f \( -name "*.ttf" -o -name "*.otf" \) -exec cp -f ${{ github.workspace }}/main/Pyidaungsu.ttf {} \;
 
           # Strip embedded Swift dylibs
           find tmp_payload/Payload/*.app/ -name "libswift*.dylib" -print -delete
